@@ -42,7 +42,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
   }
 
   return (
-    <header className="h-16 shrink-0 border-b border-surface-lightborder dark:border-surface-darkborder bg-surface-lightcard/80 dark:bg-surface-darkcard/80 backdrop-blur px-4 md:px-8 flex items-center justify-between gap-4">
+    <header className="relative z-20 h-16 shrink-0 border-b border-surface-lightborder dark:border-surface-darkborder bg-surface-lightcard/80 dark:bg-surface-darkcard/80 backdrop-blur px-4 md:px-8 flex items-center justify-between gap-4">
       <div className="min-w-0">
         <h1 className="text-lg md:text-xl font-display font-semibold truncate">{title}</h1>
         {subtitle && <p className="text-xs text-black/50 dark:text-white/40 truncate">{subtitle}</p>}
@@ -70,7 +70,10 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
 
         <div className="relative" ref={panelRef}>
           <button
-            onClick={() => setShowNotifs((s) => !s)}
+            onClick={() => {
+              setShowNotifs((s) => !s)
+              setShowProfile(false)
+            }}
             className="relative h-9 w-9 rounded-lg flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 focus-ring"
             aria-label="Notifications"
           >
@@ -118,7 +121,10 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
 
         <div className="relative" ref={profileRef}>
           <button
-            onClick={() => setShowProfile((s) => !s)}
+            onClick={() => {
+              setShowProfile((s) => !s)
+              setShowNotifs(false)
+            }}
             className="h-9 w-9 rounded-full bg-signal text-white flex items-center justify-center text-sm font-semibold shrink-0 focus-ring"
             aria-label="Account menu"
           >
