@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// =========================================================
+// OrgSynq AI — Firestore security rules
+// Paste this into Firebase Console -> Firestore Database -> Rules,
+// or deploy with the Firebase CLI: firebase deploy --only firestore:rules
+//
+// This is a demo/portfolio configuration: anyone with your web app's
+// public Firebase config can read every collection, and can perform the
+// specific writes the UI needs (adding/removing an employee, running a
+// simulation, resolving an insight, marking notifications read).
+// Before using this with real HR data, add Firebase Authentication and
+// scope these rules to request.auth.uid.
+// =========================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /departments/{departmentId} {
+      allow read: if true;
+      // Write is only used by the one-time seed script.
+      allow write: if true;
+    }
+
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    match /digital_twins/{employeeId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    match /insights/{insightId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+    }
+
+    match /simulations/{simulationId} {
+      allow read: if true;
+      allow create: if true;
+    }
+
+    match /org_health_trend/{pointId} {
+      allow read: if true;
+      // Write is only used by the one-time seed script.
+      allow write: if true;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+    }
+  }
+}
