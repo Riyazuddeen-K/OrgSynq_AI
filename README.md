@@ -3,6 +3,7 @@
 **OrgSynq AI** is an HR workforce intelligence platform: employee analytics, AI "digital twin" scoring, a workforce scenario simulator, an interactive org network graph, and an explainable AI insight feed — all backed by **Firebase (Firestore)**, with a light/dark theme.
 
 Built with React + TypeScript + Vite + Tailwind CSS + Firebase + Recharts.
+Developed for Human Resource Management.
 
 ## Features
 
