@@ -91,6 +91,11 @@ export interface Notification {
   message: string
   is_read: boolean
   created_at: string
+  // Who this notification is for: 'admin' (admin-only), 'all' (every
+  // signed-in user), or a specific employee's id (only that employee,
+  // plus admins who see everything regardless). Missing/undefined on
+  // older documents is treated as 'admin' for backward compatibility.
+  audience_employee_id?: string
 }
 
 export interface PulseResponse {
@@ -119,6 +124,12 @@ export type ActivityFeedAction =
   | 'candidate_added'
   | 'candidate_deleted'
   | 'placement_search_generated'
+  | 'course_added'
+  | 'course_removed'
+  | 'project_created'
+  | 'project_deleted'
+  | 'project_assigned'
+  | 'kudos_given'
 
 export interface ActivityFeedEntry {
   id: string
@@ -205,5 +216,45 @@ export interface PlacementSearch {
   job_brief: string
   summary: string
   matches: PlacementMatch[]
+  created_at: string
+}
+
+// -------------------------------------------------------
+// Upskilling (courses, admin-managed / employee-viewed)
+// -------------------------------------------------------
+export interface Course {
+  id: string
+  title: string
+  description: string
+  youtube_url: string
+  category?: string
+  created_at: string
+}
+
+// -------------------------------------------------------
+// Project assignment
+// -------------------------------------------------------
+export type ProjectStatus = 'Planned' | 'Active' | 'Completed'
+
+export interface Project {
+  id: string
+  name: string
+  description: string
+  status: ProjectStatus
+  member_ids: string[]
+  deadline?: string
+  created_at: string
+}
+
+// -------------------------------------------------------
+// Peer recognition (kudos)
+// -------------------------------------------------------
+export interface Kudos {
+  id: string
+  from_employee_id: string
+  from_name: string
+  to_employee_id: string
+  to_name: string
+  message: string
   created_at: string
 }
