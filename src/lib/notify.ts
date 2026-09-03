@@ -26,9 +26,16 @@ export async function pushNotification(title: string, message: string, targeting
       message,
       is_read: false,
       created_at: Timestamp.now(),
-      audience_employee_id: targeting?.employeeId ?? (targeting?.audience === 'all' ? 'all' : 'admin')
+      // Truthy check (not `??`) so an accidentally-empty employeeId string
+      // falls through to 'admin'/'all' too, instead of silently writing a
+      // notification that can never match any employee's feed.
+      audience_employee_id: targeting?.employeeId ? targeting.employeeId : targeting?.audience === 'all' ? 'all' : 'admin'
     })
-  } catch {
-    // best-effort — a missed notification shouldn't block the action that triggered it
+  } catch (err) {
+    // Surfaced to the console rather than fully silent — a missed
+    // notification shouldn't block the action that triggered it, but a
+    // silently-failing write (e.g. a permissions issue) should still be
+    // diagnosable instead of just "notifications don't work."
+    console.error('[pushNotification] failed to write notification:', { title, targeting, err })
   }
 }
