@@ -1,9 +1,25 @@
 import { GoogleGenAI } from '@google/genai'
 import type { Employee } from './types'
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined
+// Supports multiple API keys for automatic failover. VITE_GEMINI_API_KEY
+// is the primary (required) key; VITE_GEMINI_API_KEY_2 through _5 are
+// optional extras. If Google's servers are overloaded (503/429) or one
+// specific key is rejected (e.g. the "AQ." key auth issue), the next
+// configured key is tried immediately — different keys/projects aren't
+// affected by the same rate limit or the same account-level issue.
+const API_KEYS: string[] = (() => {
+  const env = import.meta.env as Record<string, string | undefined>
+  const keys: string[] = []
+  if (env.VITE_GEMINI_API_KEY) keys.push(env.VITE_GEMINI_API_KEY)
+  for (let i = 2; i <= 5; i++) {
+    const extra = env[`VITE_GEMINI_API_KEY_${i}`]
+    if (extra) keys.push(extra)
+  }
+  return keys
+})()
 
-export const isGeminiConfigured = Boolean(apiKey)
+export const isGeminiConfigured = API_KEYS.length > 0
+export const configuredKeyCount = API_KEYS.length
 
 // Google retires specific Flash model versions frequently (gemini-1.5-flash,
 // then gemini-2.5-flash, were both retired within months of each other).
@@ -14,20 +30,21 @@ export const isGeminiConfigured = Boolean(apiKey)
 // ai.google.dev/gemini-api/docs/models for the current alias name.
 const MODEL = 'gemini-flash-latest'
 
-let ai: GoogleGenAI | null = null
+const clientCache = new Map<string, GoogleGenAI>()
 
-function getAI(): GoogleGenAI {
-  if (!ai) {
-    if (!apiKey) throw new Error('VITE_GEMINI_API_KEY is not set')
-    ai = new GoogleGenAI({ apiKey })
+function getClientForKey(key: string): GoogleGenAI {
+  let client = clientCache.get(key)
+  if (!client) {
+    client = new GoogleGenAI({ apiKey: key })
+    clientCache.set(key, client)
   }
-  return ai
+  return client
 }
 
 // Google's Gemini API occasionally returns 503/UNAVAILABLE or 429/
-// RESOURCE_EXHAUSTED when their servers are under heavy load — this is
-// transient and usually clears within a few seconds, not a bug in this
-// app. Retry a few times with increasing delay before giving up.
+// RESOURCE_EXHAUSTED when their servers are under heavy load, or a
+// specific key/project has hit its quota — this is transient (or at
+// least isolated to that one key), not a bug in this app.
 function isRetryableGeminiError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err)
   return /"code":\s*(503|429)|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded/i.test(message)
@@ -36,38 +53,65 @@ function isRetryableGeminiError(err: unknown): boolean {
 // As of mid-to-late 2026, Google AI Studio began issuing "AQ."-prefixed
 // keys (replacing the older "AIzaSy..." format) that a lot of accounts
 // currently cannot authenticate with on generativelanguage.googleapis.com
-// — this is a known, ongoing issue on Google's side (see
-// discuss.ai.google.dev, e.g. threads titled "AQ. key returns 401
-// ACCESS_TOKEN_TYPE_UNSUPPORTED"), reproducible even with a bare curl
-// request, not something an app's code can work around. Detect it so we
-// can show something actionable instead of a raw JSON blob, and skip
-// retrying it — retrying a hard auth rejection just wastes three round
-// trips for the same result.
+// — a known, ongoing issue on Google's side (see discuss.ai.google.dev,
+// e.g. threads titled "AQ. key returns 401 ACCESS_TOKEN_TYPE_UNSUPPORTED").
+// If only some of the configured keys are affected, rotating to another
+// key can route around it entirely.
 function isAuthTokenTypeError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err)
   return /"code":\s*401|UNAUTHENTICATED|ACCESS_TOKEN_TYPE_UNSUPPORTED/i.test(message)
 }
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+// Remembers which key last worked, so subsequent calls try it first
+// instead of always starting from the front of the list.
+let preferredKeyIndex = 0
+
+/**
+ * Runs `fn` against each configured API key in turn (starting from
+ * whichever key last succeeded), immediately moving to the next key on
+ * any failure — no delay, since a different key/project isn't subject to
+ * the same rate limit or auth issue. After a full pass through every key
+ * fails, waits briefly and does another pass (up to 2 full passes total)
+ * before giving up with a clear, honest error message.
+ */
+async function withKeyRotation<T>(fn: (client: GoogleGenAI) => Promise<T>): Promise<T> {
+  if (API_KEYS.length === 0) throw new Error('VITE_GEMINI_API_KEY is not set')
+
+  const maxPasses = 2
   let lastErr: unknown
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn()
-    } catch (err) {
-      lastErr = err
-      if (isAuthTokenTypeError(err)) break
-      if (!isRetryableGeminiError(err) || i === attempts - 1) break
-      await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** i))
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (pass > 0) {
+      // Every key was tried and failed — wait briefly before a fresh
+      // pass, in case it really was transient overload clearing.
+      await new Promise((resolve) => setTimeout(resolve, 900 * 2 ** (pass - 1)))
+    }
+
+    for (let i = 0; i < API_KEYS.length; i++) {
+      const idx = (preferredKeyIndex + i) % API_KEYS.length
+      const client = getClientForKey(API_KEYS[idx])
+      try {
+        const result = await fn(client)
+        preferredKeyIndex = idx
+        return result
+      } catch (err) {
+        lastErr = err
+        // Try the next key regardless of error type — a different
+        // key/project may not share the same overload, quota, or auth issue.
+      }
     }
   }
+
   if (isAuthTokenTypeError(lastErr)) {
     throw new Error(
-      "Google is rejecting this API key with a 401 (ACCESS_TOKEN_TYPE_UNSUPPORTED). This is a known, ongoing issue on Google's side affecting the newer \"AQ.\"-prefixed AI Studio keys — not something wrong in this app, and not fixable by retrying. If you have an older key starting with \"AIzaSy\" (from before mid-2026), that format still works — try that instead. Otherwise this is currently unresolved on Google's end; track it at discuss.ai.google.dev."
+      API_KEYS.length > 1
+        ? `Google is rejecting all ${API_KEYS.length} configured API keys with a 401 (ACCESS_TOKEN_TYPE_UNSUPPORTED). This is a known, ongoing issue on Google's side affecting the newer "AQ."-prefixed AI Studio keys. If you have an older key starting with "AIzaSy", add that as another VITE_GEMINI_API_KEY_n. Otherwise this is currently unresolved on Google's end; track it at discuss.ai.google.dev.`
+        : "Google is rejecting this API key with a 401 (ACCESS_TOKEN_TYPE_UNSUPPORTED). This is a known, ongoing issue on Google's side affecting the newer \"AQ.\"-prefixed AI Studio keys — not something wrong in this app, and not fixable by retrying. If you have an older key starting with \"AIzaSy\" (from before mid-2026), that format still works — try that instead, or add it as a second key (see .env.example) so this app can fail over to it automatically. Otherwise this is currently unresolved on Google's end; track it at discuss.ai.google.dev."
     )
   }
   throw new Error(
     isRetryableGeminiError(lastErr)
-      ? "Gemini is temporarily overloaded on Google's side. This usually clears within a minute — please try again shortly."
+      ? `Gemini is temporarily overloaded on Google's side${API_KEYS.length > 1 ? ` (tried all ${API_KEYS.length} configured keys)` : ''}. This usually clears within a minute — please try again shortly.${API_KEYS.length === 1 ? ' Adding a second API key (see .env.example) lets this app automatically fail over next time.' : ''}`
       : lastErr instanceof Error
         ? lastErr.message
         : 'Something went wrong talking to Gemini.'
@@ -89,8 +133,6 @@ export async function askOrgSynq(
   employees: Employee[],
   history: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = []
 ): Promise<string> {
-  const client = getAI()
-
   const context = `
 Current workforce snapshot (${employees.length} employees):
 ${JSON.stringify(
@@ -108,22 +150,23 @@ ${JSON.stringify(
 )}
 `
 
-  const chat = client.chats.create({
-    model: MODEL,
-    history: [
-      {
-        role: 'user',
-        parts: [{ text: `${SYSTEM_PROMPT}\n\nWorkforce data:\n${context}` }]
-      },
-      {
-        role: 'model',
-        parts: [{ text: 'Understood. I have the workforce data loaded. How can I help you analyze it?' }]
-      },
-      ...history
-    ]
+  const result = await withKeyRotation((client) => {
+    const chat = client.chats.create({
+      model: MODEL,
+      history: [
+        {
+          role: 'user',
+          parts: [{ text: `${SYSTEM_PROMPT}\n\nWorkforce data:\n${context}` }]
+        },
+        {
+          role: 'model',
+          parts: [{ text: 'Understood. I have the workforce data loaded. How can I help you analyze it?' }]
+        },
+        ...history
+      ]
+    })
+    return chat.sendMessage({ message: question })
   })
-
-  const result = await withRetry(() => chat.sendMessage({ message: question }))
   return result.text ?? ''
 }
 
@@ -154,8 +197,6 @@ export interface TeamCandidate {
 }
 
 export async function recommendTeam(brief: string, candidates: TeamCandidate[]): Promise<TeamRecommendationResult> {
-  const client = getAI()
-
   const prompt = `${SYSTEM_PROMPT}
 
 A manager has described a project or policy that needs a team of employees allocated to it. Your job is to select the best-fitting employees from the workforce roster below and explain why.
@@ -189,7 +230,7 @@ Return ONLY a JSON object with this exact shape, no markdown, no explanation:
 
 Select between 2 and 8 members — only include people who are a genuine fit, not padding to hit a number. Every "employee_id" MUST be copied exactly from the roster's "id" field — never invent an id or use a name.`
 
-  const result = await withRetry(() => client.models.generateContent({ model: MODEL, contents: prompt }))
+  const result = await withKeyRotation((client) => client.models.generateContent({ model: MODEL, contents: prompt }))
   const text = (result.text ?? '').trim()
   const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
   const parsed = JSON.parse(clean) as TeamRecommendationResult
@@ -215,8 +256,6 @@ export interface GeneratedInsight {
 }
 
 export async function generateInsights(employees: Employee[]): Promise<GeneratedInsight[]> {
-  const client = getAI()
-
   const prompt = `${SYSTEM_PROMPT}
 
 You are analyzing the following workforce data and must identify the top 3 most important risks, opportunities, or recommendations.
@@ -247,7 +286,7 @@ Return a JSON array of exactly 3 insight objects. Each must have these fields:
 
 Respond with ONLY the JSON array, no markdown, no explanation.`
 
-  const result = await withRetry(() => client.models.generateContent({ model: MODEL, contents: prompt }))
+  const result = await withKeyRotation((client) => client.models.generateContent({ model: MODEL, contents: prompt }))
   const text = (result.text ?? '').trim()
 
   // Strip markdown code fences if present
@@ -279,8 +318,6 @@ export interface OneOnOneContext {
 }
 
 export async function generateOneOnOnePrep(ctx: OneOnOneContext): Promise<string> {
-  const client = getAI()
-
   const prompt = `${SYSTEM_PROMPT}
 
 Prepare talking points for a manager's upcoming 1:1 with this employee. Be specific and useful — not generic management advice.
@@ -295,7 +332,7 @@ Write your response as Markdown with:
 - If recentPulses includes a note field, reference what the employee actually said
 - Keep the whole thing under 200 words. No preamble, start directly with the content.`
 
-  const result = await withRetry(() => client.models.generateContent({ model: MODEL, contents: prompt }))
+  const result = await withKeyRotation((client) => client.models.generateContent({ model: MODEL, contents: prompt }))
   return (result.text ?? '').trim()
 }
 
@@ -315,8 +352,6 @@ export async function suggestCareerPaths(
   employee: { name: string; title: string; department?: string; skills: string[]; experience_years: number; performance: number },
   orgRoster: Array<{ title: string; department?: string; skills: string[]; experience_years: number }>
 ): Promise<CareerPathResult> {
-  const client = getAI()
-
   const prompt = `${SYSTEM_PROMPT}
 
 An employee wants to understand plausible next-step roles for their career, based on their current skills/experience and the roles that actually exist in this organization today (there's no historical promotion-transition data available, so ground your suggestions in what roles/skills currently exist in the org roster below, not invented history).
@@ -341,7 +376,7 @@ Return ONLY a JSON object with this shape, no markdown, no explanation:
 
 Suggest 2-3 paths. Be honest about skill gaps rather than flattering.`
 
-  const result = await withRetry(() => client.models.generateContent({ model: MODEL, contents: prompt }))
+  const result = await withKeyRotation((client) => client.models.generateContent({ model: MODEL, contents: prompt }))
   const text = (result.text ?? '').trim()
   const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
   return JSON.parse(clean) as CareerPathResult
@@ -375,8 +410,6 @@ export interface PlacementSearchResult {
 }
 
 export async function matchCandidates(jobBrief: string, candidates: PlacementCandidateInput[]): Promise<PlacementSearchResult> {
-  const client = getAI()
-
   const prompt = `${SYSTEM_PROMPT}
 
 An admin is hiring for an open role and needs help ranking external candidates from the pool below against the job description.
@@ -409,7 +442,7 @@ Return ONLY a JSON object with this exact shape, no markdown, no explanation:
 
 Rank and include only genuinely relevant candidates (typically 1-6) — don't pad the list to hit a number. Every "candidate_id" MUST be copied exactly from the pool's "id" field — never invent an id or use a name. Order matches from strongest to weakest fit.`
 
-  const result = await withRetry(() => client.models.generateContent({ model: MODEL, contents: prompt }))
+  const result = await withKeyRotation((client) => client.models.generateContent({ model: MODEL, contents: prompt }))
   const text = (result.text ?? '').trim()
   const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
   const parsed = JSON.parse(clean) as PlacementSearchResult
