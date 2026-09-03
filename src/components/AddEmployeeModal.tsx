@@ -217,7 +217,7 @@ export default function AddEmployeeModal({ departments, managers, employee, onCl
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-4">
-          <SliderField label="Performance" value={performance} onChange={setPerformance} max={120} />
+          <SliderField label="Performance" value={performance} onChange={setPerformance} max={100} />
           <SliderField label="Burnout" value={burnout} onChange={setBurnout} max={100} />
           <SliderField label="Attrition Risk" value={attritionRisk} onChange={setAttritionRisk} max={100} />
         </div>
