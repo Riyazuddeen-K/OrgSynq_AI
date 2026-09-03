@@ -37,13 +37,20 @@ export function useNotifications() {
     // it gets filtered out, then cap to 20 after filtering.
     if (role !== 'employee') {
       const q = query(collection(db, 'notifications'), orderBy('created_at', 'desc'), limit(50))
-      const unsub = onSnapshot(q, (snap) => {
-        const relevant = fromSnap(snap).filter(
-          (n) => !n.audience_employee_id || n.audience_employee_id === 'admin' || n.audience_employee_id === 'all'
-        )
-        setNotifications(relevant.slice(0, 20))
-        setLoading(false)
-      })
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const relevant = fromSnap(snap).filter(
+            (n) => !n.audience_employee_id || n.audience_employee_id === 'admin' || n.audience_employee_id === 'all'
+          )
+          setNotifications(relevant.slice(0, 20))
+          setLoading(false)
+        },
+        (err) => {
+          console.error('[useNotifications] admin feed failed to load:', err)
+          setLoading(false)
+        }
+      )
       return unsub
     }
 
@@ -72,7 +79,8 @@ export function useNotifications() {
         broadcastLoaded = true
         merge()
       },
-      () => {
+      (err) => {
+        console.error('[useNotifications] broadcast feed failed to load:', err)
         broadcastLoaded = true
         merge()
       }
@@ -87,11 +95,14 @@ export function useNotifications() {
           personalLoaded = true
           merge()
         },
-        () => {
+        (err) => {
+          console.error('[useNotifications] personal feed failed to load for employeeId', employeeId, ':', err)
           personalLoaded = true
           merge()
         }
       )
+    } else {
+      console.warn('[useNotifications] employee role but profile.employee_id is not set — personal notifications (awards, project assignments, etc.) cannot be matched to this account. Check that this user is linked to an employee record.')
     }
 
     return () => {
