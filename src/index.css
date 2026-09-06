@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply font-body antialiased;
+    letter-spacing: -0.01em;
+  }
+  body {
+    @apply bg-surface-light text-[#0F172A] dark:bg-surface-dark dark:text-[#EDEFF7] transition-colors duration-200 selection:bg-signal/30;
+    min-height: 100vh;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+
+  /* ── Global dark-mode form element fixes ── */
+  .dark input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) {
+    @apply text-white;
+    color-scheme: dark;
+  }
+  .dark input::placeholder {
+    @apply text-slate-500;
+  }
+  .dark textarea {
+    @apply text-white;
+    color-scheme: dark;
+  }
+  .dark textarea::placeholder {
+    @apply text-slate-500;
+  }
+  .dark select {
+    color-scheme: dark;
+    @apply text-white;
+    background-color: #0E131F;
+  }
+  .dark select option {
+    background-color: #0E131F;
+    color: white;
+  }
+}
+
+@layer utilities {
+  .card {
+    @apply bg-surface-lightcard/90 dark:bg-surface-darkcard/90 backdrop-blur-md border border-slate-200/80 dark:border-white/[0.07] rounded-xl2 shadow-card transition-all duration-200;
+  }
+  .card-interactive {
+    @apply card hover:shadow-card-hover hover:border-signal/40 hover:-translate-y-0.5 cursor-pointer;
+  }
+  .card-glass {
+    @apply bg-white/80 dark:bg-surface-darkcard/80 backdrop-blur-xl border border-slate-200/60 dark:border-white/[0.08] rounded-xl2 shadow-lg;
+  }
+  /*
+   * Nearly-opaque variant of card-glass for floating panels that sit
+   * directly over live page content with no dimming overlay behind them
+   * (notification/profile dropdowns, the AI chat widget). card-glass's
+   * 80% transparency lets busy dashboard content and ambient glows bleed
+   * through and fight with the text on top of it — this keeps the same
+   * look but solid enough to stay readable no matter what's behind it.
+   */
+  .card-solid {
+    @apply bg-white dark:bg-surface-darkcard border border-slate-200/80 dark:border-white/[0.1] rounded-xl2 shadow-lg;
+  }
+  .input {
+    @apply w-full px-3.5 py-2.5 rounded-xl text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-white/[0.05] border border-slate-200 dark:border-white/[0.08] focus:border-signal/70 focus:bg-white dark:focus:bg-surface-darkcard focus-ring transition-all duration-200 placeholder:text-slate-400 dark:placeholder:text-slate-500;
+  }
+  .gradient-text-signal {
+    @apply bg-gradient-to-r from-indigo-500 via-signal to-purple-400 bg-clip-text text-transparent;
+  }
+  .gradient-text-teal {
+    @apply bg-gradient-to-r from-teal to-emerald-400 bg-clip-text text-transparent;
+  }
+  .gradient-text-amber {
+    @apply bg-gradient-to-r from-amber to-orange-400 bg-clip-text text-transparent;
+  }
+  .badge-glow {
+    @apply relative overflow-hidden before:absolute before:inset-0 before:bg-white/20 before:opacity-0 hover:before:opacity-100 before:transition-opacity;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-slate-300/80 dark:bg-slate-700/80 rounded-full hover:bg-slate-400 dark:hover:bg-slate-600;
+  }
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-signal/80 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-light dark:focus-visible:ring-offset-surface-dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
